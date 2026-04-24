@@ -12,7 +12,6 @@ import { EPub } from 'epub2';
 import { convert } from 'html-to-text';
 import dotenv from 'dotenv';
 import { pipeline, env } from '@xenova/transformers';
-import { search, SafeSearchType } from 'duck-duck-scrape';
 import * as cheerio from 'cheerio';
 
 dotenv.config();
@@ -94,10 +93,20 @@ const DATA_FILE = path.join(process.cwd(), '.data', 'store.json');
 function loadStore() {
   try {
     if (fs.existsSync(DATA_FILE)) {
-      const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
-      booksDb = data.booksDb || {};
-      vectorStore = data.vectorStore || [];
-      console.log(`Loaded ${Object.keys(booksDb).length} books and ${vectorStore.length} chunks from disk.`);
+      const fileContent = fs.readFileSync(DATA_FILE, 'utf-8');
+      if (fileContent.trim() !== '') {
+        try {
+          const data = JSON.parse(fileContent);
+          booksDb = data.booksDb || {};
+          vectorStore = data.vectorStore || [];
+          console.log(`Loaded ${Object.keys(booksDb).length} books and ${vectorStore.length} chunks from disk.`);
+        } catch (parseErr) {
+          console.error("Failed to parse store.json. Backing up corrupted file and starting fresh.", parseErr);
+          fs.renameSync(DATA_FILE, DATA_FILE + '.corrupt.' + Date.now());
+          booksDb = {};
+          vectorStore = [];
+        }
+      }
     }
   } catch (err) {
     console.error("Failed to load store:", err);
@@ -108,7 +117,10 @@ function saveStore() {
   try {
     const dir = path.dirname(DATA_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(DATA_FILE, JSON.stringify({ booksDb, vectorStore }));
+    
+    const tempFile = DATA_FILE + '.tmp';
+    fs.writeFileSync(tempFile, JSON.stringify({ booksDb, vectorStore }));
+    fs.renameSync(tempFile, DATA_FILE);
   } catch (err) {
     console.error("Failed to save store:", err);
   }
@@ -131,7 +143,7 @@ function cosineSimilarity(A: number[], B: number[]) {
 }
 
 // Helper: Chunk Text
-function chunkText(text: string, chunkSize = 1500, overlap = 200) {
+function chunkText(text: string, chunkSize = 800, overlap = 150) {
   const chunks = [];
   let i = 0;
   while (i < text.length) {
@@ -509,10 +521,34 @@ app.post('/api/upload-url', async (req, res) => {
   }
 });
 
+async function doDuckDuckGoSearch(query: string) {
+  try {
+    const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
+    const html = await res.text();
+    const $ = cheerio.load(html);
+    const results: any[] = [];
+    $('.result').each((i, el) => {
+      const title = $(el).find('.result__title').text().trim();
+      const snippet = $(el).find('.result__snippet').text().trim();
+      let url = $(el).find('.result__url').attr('href') || '';
+      if (url.startsWith('//duckduckgo.com/l/?uddg=')) {
+         url = decodeURIComponent(url.split('uddg=')[1].split('&')[0]);
+      }
+      if (title && snippet) results.push({title, description: snippet, url});
+    });
+    return { results };
+  } catch (e: any) {
+    console.error("DDG HTML search error:", e);
+    return { results: [] };
+  }
+}
+
 async function learnFromWeb(query: string, useLocalModel: boolean): Promise<boolean> {
   console.log(`Self-Improving: Searching web for "${query}"...`);
   try {
-    const searchResults = await search(query, { safeSearch: SafeSearchType.OFF });
+    const searchResults = await doDuckDuckGoSearch(query);
     if (!searchResults.results || searchResults.results.length === 0) return false;
 
     let combinedText = `[Self-Learned Web Knowledge for: ${query}]\n\n`;
@@ -706,7 +742,7 @@ Instructions:
                console.log(`Lostx: Anonymous search requested for: "${searchQ}"`);
                let searchResultStr = "";
                try {
-                   const searchResults = await search(searchQ, { safeSearch: SafeSearchType.OFF });
+                   const searchResults = await doDuckDuckGoSearch(searchQ);
                    searchResultStr = searchResults.results.slice(0, 5).map(r => `${r.title}\n${r.description}\n${r.url}`).join('\n\n');
                    if (!searchResultStr) searchResultStr = "No results found.";
                } catch (err: any) {

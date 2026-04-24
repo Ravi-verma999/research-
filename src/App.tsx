@@ -723,17 +723,13 @@ export default function App() {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              disabled={books.length === 0 || isTyping}
-              placeholder={
-                books.length === 0
-                  ? "System locked. Upload knowledge source to enable..."
-                  : "Ask Lostx or Query Books (e.g. 'Can you use anonymous search for bug bounty?')..."
-              }
+              disabled={isTyping}
+              placeholder="Ask Lostx or Query Books (e.g. 'Can you use anonymous search for bug bounty?')..."
               className="w-full bg-[#0a1122] border border-cyan-900/50 rounded-none border-l-2 py-4 pl-12 pr-14 text-white focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 disabled:opacity-50 placeholder-cyan-800 transition-all font-mono"
             />
             <button
               type="submit"
-              disabled={!input.trim() || books.length === 0 || isTyping}
+              disabled={!input.trim() || isTyping}
               className="absolute right-2 p-2 bg-cyan-400 text-black hover:bg-cyan-400 rounded-sm transition-colors disabled:opacity-50 disabled:bg-cyan-900"
             >
               <Send className="w-5 h-5" />
