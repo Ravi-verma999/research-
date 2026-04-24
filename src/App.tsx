@@ -45,7 +45,7 @@ export default function App() {
   const [uploadNote, setUploadNote] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [inputUrl, setInputUrl] = useState("");
-  const [useLocalModel, setUseLocalModel] = useState(false);
+  const [useLocalModel, setUseLocalModel] = useState(true);
   const [pastedTitle, setPastedTitle] = useState("");
   const [pastedText, setPastedText] = useState("");
   const [uploadMode, setUploadMode] = useState<"files" | "url" | "text">(
