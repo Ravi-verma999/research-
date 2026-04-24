@@ -31,6 +31,9 @@ export default function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [inputUrl, setInputUrl] = useState('');
   const [useLocalModel, setUseLocalModel] = useState(true);
+  const [pastedTitle, setPastedTitle] = useState('');
+  const [pastedText, setPastedText] = useState('');
+  const [uploadMode, setUploadMode] = useState<'files' | 'url' | 'text'>('files');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -78,20 +81,46 @@ export default function App() {
     }
   };
 
+  const handleTextUpload = async () => {
+    if (!pastedText.trim()) return;
+    setIsUploading(true);
+    setUploadNote(null);
+    try {
+      const res = await fetch('/api/upload-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: pastedTitle.trim(), text: pastedText.trim(), useLocalModel })
+      });
+      const data = await res.json();
+      
+      if (!res.ok) throw new Error(data.error || 'Failed to paste text');
+      setUploadNote(data.note || 'Text indexed successfully');
+      setPastedText('');
+      setPastedTitle('');
+      fetchBooks();
+    } catch (err: any) {
+      alert("Text Upload Failed: " + err.message);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
 
-    // Filter PDFs and EPUBs if a folder was selected
+    // Filter PDFs, EPUBs, and TXT files if a folder was selected
     const validFiles = files.filter(f => 
       f.type === 'application/pdf' || 
       f.name.toLowerCase().endsWith('.pdf') || 
       f.name.toLowerCase().endsWith('.epub') || 
-      f.type === 'application/epub+zip'
+      f.type === 'application/epub+zip' ||
+      f.name.toLowerCase().endsWith('.txt') ||
+      f.type === 'text/plain'
     );
 
     if (validFiles.length === 0) {
-      alert("No valid PDF or EPUB files found.");
+      alert("No valid PDF, EPUB, or TXT files found.");
       return;
     }
 
@@ -228,61 +257,101 @@ export default function App() {
             />
             <span>Use Local AI Models (Offline Mode)</span>
           </label>
-        
-          <input 
-            type="file" 
-            accept="application/pdf,.epub,application/epub+zip"
-            className="hidden" 
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            multiple
-          />
-          <input 
-            type="file" 
-            className="hidden" 
-            ref={folderInputRef}
-            onChange={handleFileUpload}
-            //@ts-ignore
-            webkitdirectory="true"
-            directory="true"
-            multiple
-          />
-          <div className="flex space-x-2 w-full">
-            <button 
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              className="flex-1 relative py-2 bg-green-500/10 hover:bg-green-500/20 border border-green-500/50 text-green-400 text-xs font-bold rounded-lg transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
-            >
-              {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-              <span>FILES</span>
-            </button>
-            <button 
-              onClick={() => folderInputRef.current?.click()}
-              disabled={isUploading}
-              className="flex-1 relative py-2 bg-green-500/10 hover:bg-green-500/20 border border-green-500/50 text-green-400 text-xs font-bold rounded-lg transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
-            >
-              {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-              <span>FOLDER</span>
-            </button>
-          </div>
 
-          <div className="flex space-x-2 w-full mt-2">
-            <input 
-              type="text" 
-              value={inputUrl}
-              onChange={e => setInputUrl(e.target.value)}
-              placeholder="Cloud link (Drive, PDF url)..."
-              className="flex-1 bg-black/50 border border-green-500/30 rounded p-2 text-xs text-green-400 focus:outline-none"
-              disabled={isUploading}
-            />
-            <button 
-              onClick={handleUrlUpload}
-              disabled={isUploading || !inputUrl.trim()}
-              className="px-3 py-2 bg-green-500/20 text-green-400 font-bold rounded-lg text-xs border border-green-500/50 disabled:opacity-50 flex items-center justify-center"
-            >
-              {isUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'FETCH'}
-            </button>
+          <div className="flex border-b border-green-900/40 text-xs font-bold w-full text-green-600/50">
+            <button onClick={() => setUploadMode('files')} className={`flex-1 py-2 text-center border-b-2 transition-all ${uploadMode === 'files' ? 'border-green-500 text-green-400 bg-green-900/10' : 'border-transparent hover:text-green-500/80 hover:bg-green-900/5'}`}>FILES</button>
+            <button onClick={() => setUploadMode('url')} className={`flex-1 py-2 text-center border-b-2 transition-all ${uploadMode === 'url' ? 'border-green-500 text-green-400 bg-green-900/10' : 'border-transparent hover:text-green-500/80 hover:bg-green-900/5'}`}>URL</button>
+            <button onClick={() => setUploadMode('text')} className={`flex-1 py-2 text-center border-b-2 transition-all ${uploadMode === 'text' ? 'border-green-500 text-green-400 bg-green-900/10' : 'border-transparent hover:text-green-500/80 hover:bg-green-900/5'}`}>TEXT</button>
           </div>
+        
+          {uploadMode === 'files' && (
+            <div className="space-y-2 mt-2">
+              <input 
+                type="file" 
+                accept="application/pdf,.epub,application/epub+zip,.txt,text/plain"
+                className="hidden" 
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                multiple
+              />
+              <input 
+                type="file" 
+                className="hidden" 
+                ref={folderInputRef}
+                onChange={handleFileUpload}
+                //@ts-ignore
+                webkitdirectory="true"
+                directory="true"
+                multiple
+              />
+              <div className="flex space-x-2 w-full">
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="flex-1 relative py-2 bg-green-500/10 hover:bg-green-500/20 border border-green-500/50 text-green-400 text-xs font-bold rounded-lg transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+                >
+                  {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                  <span>FILES</span>
+                </button>
+                <button 
+                  onClick={() => folderInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="flex-1 relative py-2 bg-green-500/10 hover:bg-green-500/20 border border-green-500/50 text-green-400 text-xs font-bold rounded-lg transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+                >
+                  {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                  <span>FOLDER</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {uploadMode === 'url' && (
+            <div className="flex space-x-2 w-full mt-2">
+              <input 
+                type="text" 
+                value={inputUrl}
+                onChange={e => setInputUrl(e.target.value)}
+                placeholder="Cloud link (Drive, PDF url)..."
+                className="flex-1 bg-black/50 border border-green-500/30 rounded p-2 text-xs text-green-400 focus:outline-none"
+                disabled={isUploading}
+              />
+              <button 
+                onClick={handleUrlUpload}
+                disabled={isUploading || !inputUrl.trim()}
+                className="px-3 py-2 bg-green-500/20 text-green-400 font-bold rounded-lg text-xs border border-green-500/50 disabled:opacity-50 flex items-center justify-center"
+              >
+                {isUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'FETCH'}
+              </button>
+            </div>
+          )}
+
+          {uploadMode === 'text' && (
+            <div className="space-y-2 mt-2">
+              <input 
+                type="text" 
+                value={pastedTitle}
+                onChange={e => setPastedTitle(e.target.value)}
+                placeholder="Title (Optional)"
+                className="w-full bg-black/50 border border-green-500/30 rounded p-2 text-xs text-green-400 focus:outline-none"
+                disabled={isUploading}
+              />
+              <textarea
+                value={pastedText}
+                onChange={e => setPastedText(e.target.value)}
+                placeholder="Paste your commands, text, or notes here..."
+                className="w-full h-24 resize-none bg-black/50 border border-green-500/30 rounded p-2 text-xs text-green-400 focus:outline-none scrollbar-thin scrollbar-thumb-green-900 scrollbar-track-transparent"
+                disabled={isUploading}
+              />
+              <button 
+                onClick={handleTextUpload}
+                disabled={isUploading || !pastedText.trim()}
+                className="w-full relative py-2 bg-green-500/10 hover:bg-green-500/20 border border-green-500/50 text-green-400 text-xs font-bold rounded-lg transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+              >
+                {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                <span>SAVE KNOWLEDGE</span>
+              </button>
+            </div>
+          )}
           
           {uploadNote && (
             <div className="mt-3 flex items-start space-x-2 text-[10px] text-yellow-500/80 bg-yellow-500/10 p-2 rounded border border-yellow-500/20">

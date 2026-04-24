@@ -314,6 +314,43 @@ app.post('/api/upload-book', upload.array('books', 50), async (req, res) => {
   }
 });
 
+app.post('/api/upload-text', async (req, res) => {
+  try {
+    const { title, text, useLocalModel } = req.body;
+    if (!text) return res.status(400).json({ error: "Text content is required" });
+    const isLocal = useLocalModel === true || useLocalModel === 'true';
+    
+    // Default title if not provided
+    const safeTitle = title ? title.trim() : `Pasted Notes ${new Date().toLocaleTimeString()}`;
+    const filename = `${safeTitle}.txt`;
+    const buffer = Buffer.from(text, 'utf-8');
+
+    console.log(`Processing pasted text: ${filename} (${buffer.length} bytes)`);
+    const result = await ingestBookBuffer(buffer, filename, 'text/plain', isLocal);
+    
+    saveStore();
+
+    if (result.error && result.embeddedCount === 0) {
+      return res.status(400).json({ error: `Upload failed: ${result.error}` });
+    }
+
+    const note = result.chunksCount > result.embeddedCount 
+      ? `Found ${result.chunksCount} chunks but only indexed ${result.embeddedCount} limit applied.` 
+      : `Indexed all ${result.embeddedCount} chunks.`;
+
+    res.json({
+      success: true,
+      message: `Successfully indexed pasted text "${safeTitle}".`,
+      chunksIndexed: result.embeddedCount,
+      totalChunksFound: result.chunksCount,
+      note
+    });
+  } catch (err: any) {
+    console.error("Text upload error:", err);
+    res.status(500).json({ error: err.message || "Internal server error" });
+  }
+});
+
 app.post('/api/upload-url', async (req, res) => {
   try {
     let { url, useLocalModel } = req.body;
