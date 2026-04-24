@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Upload, Book as BookIcon, Terminal, Send, Trash2, Shield, Loader2, Info } from 'lucide-react';
+import { Upload, Book as BookIcon, Terminal, Send, Trash2, Shield, Loader2, Info, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 
@@ -161,6 +161,34 @@ export default function App() {
     }
   };
 
+  const handleBackupBrain = () => {
+    window.location.href = '/api/export-brain';
+  };
+
+  const brainUploadRef = useRef<HTMLInputElement>(null);
+
+  const handleRestoreBrain = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append('brainFile', file);
+
+    try {
+      const res = await fetch('/api/import-brain', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      alert("Brain restored successfully! All knowledge acquired.");
+      fetchBooks();
+    } catch (err: any) {
+      alert("Brain import failed: " + err.message);
+    } finally {
+      setIsUploading(false);
+      if (brainUploadRef.current) brainUploadRef.current.value = '';
+    }
+  };
+
   const submitQuery = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || books.length === 0) return;
@@ -244,6 +272,36 @@ export default function App() {
                 No vectors in DB. Upload a book to begin extraction.
               </div>
             )}
+          </div>
+          
+          {/* Brain Sync Section */}
+          <div className="mt-4 p-3 bg-green-900/10 border border-green-900/30 rounded-lg">
+            <h2 className="text-[10px] uppercase font-bold text-green-600 tracking-wider mb-2">Brain Operations</h2>
+            <div className="flex space-x-2">
+              <button
+                onClick={handleBackupBrain}
+                className="flex-1 py-1.5 bg-black/40 hover:bg-green-900/40 border border-green-900/50 text-green-400 text-[10px] font-bold rounded flex items-center justify-center space-x-1 transition-all"
+              >
+                <Download className="w-3 h-3" />
+                <span>BACKUP</span>
+              </button>
+              <input 
+                type="file" 
+                accept=".json"
+                className="hidden" 
+                ref={brainUploadRef}
+                onChange={handleRestoreBrain}
+              />
+              <button
+                onClick={() => brainUploadRef.current?.click()}
+                disabled={isUploading}
+                className="flex-1 py-1.5 bg-black/40 hover:bg-green-900/40 border border-green-900/50 text-green-400 text-[10px] font-bold rounded flex items-center justify-center space-x-1 transition-all disabled:opacity-50"
+              >
+                <Upload className="w-3 h-3" />
+                <span>RESTORE</span>
+              </button>
+            </div>
+            <p className="text-[9px] text-green-700/80 mt-1.5 text-center">Export/Import offline to your Drive to keep knowledge forever.</p>
           </div>
         </div>
 

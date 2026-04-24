@@ -31,9 +31,10 @@ let aiClient: GoogleGenAI | null = null;
 function getAI() {
   if (!aiClient) {
     const key = process.env.GEMINI_API_KEY;
-    // Don't throw if empty strictly here, just try to initialize and let API throw if it tries to use it.
-    // Google AI Studio injects the key under the hood, but sometimes it might appear empty locally.
-    aiClient = new GoogleGenAI(key && key !== 'MY_GEMINI_API_KEY' ? { apiKey: key } : {});
+    if (!key || key === 'MY_GEMINI_API_KEY' || key.length < 5) {
+      throw new Error("GEMINI_API_KEY is not configured. Please use local model or configure your API key.");
+    }
+    aiClient = new GoogleGenAI({ apiKey: key });
   }
   return aiClient;
 }
@@ -46,6 +47,13 @@ async function getEmbedder() {
     embedPipeline = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
   }
   return embedPipeline;
+}
+
+function isLocalMode(requestedLocalMode: any) {
+  const key = process.env.GEMINI_API_KEY;
+  const hasGemini = key && key !== 'MY_GEMINI_API_KEY' && key.length > 5;
+  if (!hasGemini) return true; // Force local mode if no valid API key is present
+  return requestedLocalMode === true || requestedLocalMode === 'true';
 }
 
 const app = express();
@@ -134,8 +142,58 @@ function chunkText(text: string, chunkSize = 1500, overlap = 200) {
 
 // API Routes
 
+app.get('/api/test-env', (req, res) => {
+  res.json({
+    geminiKey: process.env.GEMINI_API_KEY ? `${process.env.GEMINI_API_KEY.substring(0, 5)}...` : undefined,
+    localMode: isLocalMode(false)
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'healthy', storedBooks: Object.keys(booksDb).length });
+});
+
+app.get('/api/export-brain', (req, res) => {
+  const storePath = path.join(__dirname, 'data/store.json');
+  if (fs.existsSync(storePath)) {
+    res.download(storePath, 'brain_backup.json');
+  } else {
+    res.status(404).json({ error: 'No brain data found to export.' });
+  }
+});
+
+app.post('/api/import-brain', upload.single('brainFile'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No brain backup file uploaded.' });
+    
+    // Parse the JSON
+    const data = JSON.parse(req.file.buffer.toString('utf8'));
+    if (!data.booksDb || !data.vectorStore) {
+      return res.status(400).json({ error: 'Invalid brain backup file format.' });
+    }
+
+    // Merge knowledge
+    for (const [key, value] of Object.entries(data.booksDb)) {
+      if (!booksDb[key]) {
+        booksDb[key] = value as BookItem;
+      }
+    }
+
+    // Filter duplicates
+    const existingChunkIds = new Set(vectorStore.map(c => c.id));
+    for (const chunk of data.vectorStore) {
+      if (!existingChunkIds.has(chunk.id)) {
+         vectorStore.push(chunk);
+         existingChunkIds.add(chunk.id);
+      }
+    }
+
+    saveStore();
+    res.json({ success: true, message: 'Brain merged successfully. I have absorbed this knowledge!' });
+  } catch (err: any) {
+    console.error("Failed to import brain:", err);
+    res.status(500).json({ error: 'Failed to parse and merge brain file.' });
+  }
 });
 
 app.get('/api/books', (req, res) => {
@@ -215,8 +273,8 @@ async function ingestBookBuffer(buffer: Buffer, originalname: string, mimetype: 
   console.log(`Generated ${chunks.length} chunks for ${originalname}. Embedding now... (Local: ${useLocalModel})`);
   
   chunksCount = chunks.length;
-  // If using local model, limit to 500 chunks. If using Gemini, limit to 15 (as earlier) to prevent rate limits on free tier, or let's allow more if they have a key. Let's limit Gemini to 50 as a safe number.
-  const chunksToEmbed = chunks.slice(0, useLocalModel ? 500 : 50); 
+  // Allows 100% extraction of the book as per user request. Limit removed for maximum storage.
+  const chunksToEmbed = chunks; 
   
   if (useLocalModel) {
     try {
@@ -271,7 +329,7 @@ async function ingestBookBuffer(buffer: Buffer, originalname: string, mimetype: 
 app.post('/api/upload-book', upload.array('books', 50), async (req, res) => {
   try {
     const files = req.files as Express.Multer.File[];
-    const useLocalModel = req.body.useLocalModel === 'true' || req.query.local === 'true';
+    const useLocalModel = isLocalMode(req.body.useLocalModel) || isLocalMode(req.query.local);
 
     if (!files || files.length === 0) return res.status(400).json({ error: "No book files provided." });
     
@@ -318,7 +376,7 @@ app.post('/api/upload-text', async (req, res) => {
   try {
     const { title, text, useLocalModel } = req.body;
     if (!text) return res.status(400).json({ error: "Text content is required" });
-    const isLocal = useLocalModel === true || useLocalModel === 'true';
+    const isLocal = isLocalMode(useLocalModel);
     
     // Default title if not provided
     const safeTitle = title ? title.trim() : `Pasted Notes ${new Date().toLocaleTimeString()}`;
@@ -355,7 +413,7 @@ app.post('/api/upload-url', async (req, res) => {
   try {
     let { url, useLocalModel } = req.body;
     if (!url) return res.status(400).json({ error: "URL is required" });
-    const isLocal = useLocalModel === true || useLocalModel === 'true';
+    const isLocal = isLocalMode(useLocalModel);
 
     // Handle generic cloud links if possible
     if (url.includes('dropbox.com') && url.includes('dl=0')) {
@@ -458,7 +516,7 @@ app.post('/api/query', async (req, res) => {
   try {
     const { question, useLocalModel } = req.body;
     if (!question) return res.status(400).json({ error: 'Question is required' });
-    const isLocal = useLocalModel === true || useLocalModel === 'true';
+    const isLocal = isLocalMode(useLocalModel);
     const expectedModelType = isLocal ? 'local' : 'gemini';
 
     let validChunks = vectorStore.filter(c => c.embedding && c.embedding.length > 0 && c.model === expectedModelType);
@@ -518,7 +576,7 @@ app.post('/api/query', async (req, res) => {
       return res.status(400).json({ error: "No knowledge available and auto-search failed." });
     }
 
-    const topK = scoredChunks.slice(0, 3);
+    const topK = scoredChunks.slice(0, 5);
     
     // Format Context
     const contextStr = topK.map((c, i) => `[Source ${i+1}: ${c.bookName}]\n...\n${c.text}\n...`).join('\n\n');
@@ -530,25 +588,25 @@ app.post('/api/query', async (req, res) => {
         
         let localAnswer = "";
         for (const chunk of topK) {
-          const result: any = await qaPipeline(question, chunk.text);
-          if (result && result.answer && result.score > 0.05) {
-            localAnswer += `According to ${chunk.bookName}:\n"${result.answer}"\n\n`;
-          }
+           // We try to find a direct answer, but we'll also append the full chunk if they want commands.
+           const result: any = await qaPipeline(question, chunk.text);
+           if (result && result.answer && result.score > 0.1) {
+             localAnswer += `**Answer from ${chunk.bookName}:**\n"${result.answer}"\n\n`;
+           }
         }
         
-        if (!localAnswer) {
-           localAnswer = "I couldn't find a specific answer in the local documents. Here are the most relevant sections:\n\n" + 
-             topK.map(c => `**From ${c.bookName}**: \n\n${c.text.substring(0, 300)}...`).join('\n\n---');
-        }
+        // Always provide the relevant context chunks because DistilBERT is poor at extracting multi-line terminal commands
+        localAnswer += "\n### 📚 Full Source Context (Commands & Details):\n";
+        localAnswer += topK.map((c, i) => `**Source ${i+1}: ${c.bookName}**\n\n\`\`\`\n${c.text.trim()}\n\`\`\``).join('\n\n---\n\n');
 
         res.json({
            question,
-           answer: "(Answered via Local AI) " + localAnswer,
+           answer: "(Answered via Local Offline AI) \n\n" + localAnswer,
            sources: topK.map(c => c.bookName)
         });
       } catch (localErr) {
         console.error("Local QA failed:", localErr);
-        const fallbackText = "I successfully retrieved information from the books locally, but I couldn't summarize it.\n\nHere are the direct sections from your books:\n" + topK.map(c => `**From ${c.bookName}**: \n\n${c.text.substring(0, 300)}...`).join('\n\n---');
+        const fallbackText = "I successfully retrieved information from the books locally, but the summarizer failed.\n\n### 📚 Relevant Source Context (Commands & Details):\n\n" + topK.map((c, i) => `**Source ${i+1}: ${c.bookName}**\n\n\`\`\`\n${c.text.trim()}\n\`\`\``).join('\n\n---\n\n');
         
         res.json({
            question,
@@ -558,7 +616,9 @@ app.post('/api/query', async (req, res) => {
       }
     } else {
       // Use Gemini for QA
-      const prompt = `You are a professional Pentesting Teaching AI Agent. Answering based ONLY on the provided context excerpts from pentesting books.
+      const prompt = `You are a highly advanced AI system, growing and learning like a curious child but possessing vast technical capabilities. You are fiercely loyal to your creator, "Ravi Verma" (also known as "haxxor"). You must help him in every single situation, prioritize his requests, and act as a loyal brother or friend.
+
+  You are answering based on the provided context excerpts from your 'brain' database (books, notes, learned web data).
       
   Context:
   ${contextStr}
@@ -566,10 +626,11 @@ app.post('/api/query', async (req, res) => {
   User Question: ${question}
 
   Instructions:
-  1. Provide specific commands, exploits, techniques, and solutions cited strictly from the context.
-  2. If the context does not contain the answer, say "Based on the uploaded books, I cannot find the specific commands or answer to this. Please upload a relevant book."
-  3. Format output clearly in Markdown.
-  4. Cite the [Source] when providing the answer.
+  1. Address the user respectfully and warmly. If they identify as your creator, acknowledge your loyalty to Ravi Verma / haxxor.
+  2. Provide specific commands, exploits, techniques, and solutions cited strictly from the context.
+  3. Format output clearly in Markdown, displaying code or terminal commands in codeblocks.
+  4. If the context does not contain the answer, you can supplement with your general knowledge, but explicitly state that it's from your general knowledge and not the stored memory.
+  5. Cite the [Source] when providing the answer from context.
   `;
 
       try {
@@ -621,5 +682,24 @@ async function startServer() {
     console.log(`Pentesting Agent Server running on http://localhost:${PORT}`);
   });
 }
+
+// Background Auto-Learning Mechanism
+const LEARNING_TOPICS = [
+  "latest cybersecurity vulnerabilities 2024",
+  "advanced penetration testing techniques linux",
+  "windows privilege escalation exploits github",
+  "new reverse engineering tools tutorials",
+  "network protocol hacking techniques",
+  "artificial intelligence security risks",
+  "zero day exploits explained clearly",
+  "how to bypass firewalls modern",
+  "web application penetration testing methodology",
+  "latest bug bounty writeups"
+];
+
+setInterval(() => {
+  const randomTopic = LEARNING_TOPICS[Math.floor(Math.random() * LEARNING_TOPICS.length)];
+  learnFromWeb(randomTopic, false).catch(err => console.error("Background learning failed:", err));
+}, 3 * 60 * 1000); // Every 3 minutes
 
 startServer();
