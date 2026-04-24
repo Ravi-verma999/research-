@@ -1,0 +1,6 @@
+{
+  "name": "Pentesting Teaching AI Agent",
+  "description": "An AI-powered Pentesting instructional agent that parses PDF books into a vector database to provide researched answers and commands using RAG.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
