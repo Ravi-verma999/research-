@@ -45,7 +45,7 @@ export default function App() {
   const [uploadNote, setUploadNote] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [inputUrl, setInputUrl] = useState("");
-  const [useLocalModel, setUseLocalModel] = useState(true);
+  const [useLocalModel, setUseLocalModel] = useState(false);
   const [pastedTitle, setPastedTitle] = useState("");
   const [pastedText, setPastedText] = useState("");
   const [uploadMode, setUploadMode] = useState<"files" | "url" | "text">(
@@ -363,14 +363,16 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen w-full bg-[#030712] text-cyan-400 font-mono overflow-hidden">
+    <div className="flex flex-col md:flex-row h-screen w-full bg-[#030712] text-cyan-400 font-mono overflow-hidden">
       {/* Sidebar Knowledge Base */}
-      <aside className="w-80 border-r border-cyan-900/30 bg-[#080d1a] flex flex-col">
-        <div className="p-4 border-b border-cyan-900/30 flex items-center space-x-3">
-          <Shield className="w-6 h-6 text-cyan-400" />
-          <h1 className="text-xl font-bold text-white tracking-widest">
-            LOSTX SYSTEM :: v2.0
-          </h1>
+      <aside className="hidden md:flex w-80 border-r border-cyan-900/30 bg-[#080d1a] flex-col shrink-0">
+        <div className="p-4 border-b border-cyan-900/30 flex flex-col space-y-2">
+          <div className="flex items-center space-x-3">
+            <Shield className="w-6 h-6 text-cyan-400" />
+            <h1 className="text-xl font-bold text-white tracking-widest">
+              LOSTX SYSTEM
+            </h1>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -606,7 +608,7 @@ export default function App() {
       </aside>
 
       {/* Main Terminal Area */}
-      <main className="flex-1 flex flex-col bg-[#010409] relative bg-[linear-gradient(to_right,#00e5ff10_1px,transparent_1px),linear-gradient(to_bottom,#00e5ff10_1px,transparent_1px)] bg-[size:24px_24px]">
+      <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#010409] relative bg-[linear-gradient(to_right,#00e5ff10_1px,transparent_1px),linear-gradient(to_bottom,#00e5ff10_1px,transparent_1px)] bg-[size:24px_24px]">
         <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6">
           {messages.map((msg) => (
             <motion.div
@@ -616,7 +618,7 @@ export default function App() {
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`max-w-[85%] rounded-none border-l-2 p-5 ${
+                className={`max-w-[85%] rounded-none border-l-2 p-3 md:p-5 min-w-0 ${
                   msg.role === "user"
                     ? "bg-cyan-400 text-black shadow-[0_0_15px_rgba(0,229,255,0.4)] rounded-br-sm"
                     : "bg-[#0a1122] border border-cyan-900/30 text-cyan-400 rounded-tl-sm"
@@ -632,12 +634,13 @@ export default function App() {
                 )}
 
                 <div
-                  className={`prose prose-sm max-w-none ${msg.role === "user" ? "prose-p:text-black font-semibold" : "prose-invert prose-p:text-cyan-300 prose-headings:text-white prose-a:text-cyan-400 prose-code:text-yellow-300 prose-code:bg-black/40 prose-pre:bg-[#060c17] prose-pre:border prose-pre:border-cyan-900/30"}`}
+                  className={`prose prose-sm max-w-none break-words overflow-hidden ${msg.role === "user" ? "prose-p:text-black font-semibold whitespace-pre-wrap" : "prose-invert prose-p:text-cyan-300 prose-headings:text-white prose-a:text-cyan-400 prose-code:text-yellow-300 prose-code:bg-black/40 prose-pre:bg-[#060c17] prose-pre:border prose-pre:border-cyan-900/30 prose-pre:overflow-x-auto prose-pre:whitespace-pre-wrap prose-pre:break-words prose-p:break-words"}`}
+                  style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}
                 >
                   {msg.role === "agent" ? (
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
                   ) : (
-                    <p className="whitespace-pre-wrap m-0">{msg.content}</p>
+                    <p className="whitespace-pre-wrap break-words m-0">{msg.content}</p>
                   )}
                 </div>
 
@@ -675,7 +678,7 @@ export default function App() {
         </div>
 
         {/* Input Area */}
-        <div className="p-4 border-t border-cyan-900/30 bg-[#050b14]">
+        <div className="p-4 border-t border-cyan-900/30 bg-[#050b14] shrink-0">
           <div className="max-w-4xl mx-auto flex items-center justify-between mb-2">
             <div className="flex space-x-3">
               <button
