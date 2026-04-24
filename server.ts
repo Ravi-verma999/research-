@@ -333,7 +333,7 @@ async function ingestBookBuffer(buffer: Buffer, originalname: string, mimetype: 
       for (const chunkTextContent of chunksToEmbed) {
         // Enforce a hard cap on text length to prevent 512 token limit errors in distilbert
         const safeChunk = chunkTextContent.length > 2000 ? chunkTextContent.slice(0, 2000) : chunkTextContent;
-        const output = await extractor(safeChunk, { pooling: 'mean', normalize: true });
+        const output = await extractor(safeChunk, { pooling: 'mean', normalize: true, truncation: true, max_length: 512 });
         const embeddingArray = Array.from(output.data) as number[];
         
         vectorStore.push({
@@ -617,7 +617,7 @@ app.post('/api/query', async (req, res) => {
         const extractor = await getEmbedder();
         // Enforce a hard cap so queries over ~512 tokens don't crash
         const safeQuery = question.length > 2000 ? question.slice(0, 2000) : question;
-        const output = await extractor(safeQuery, { pooling: 'mean', normalize: true });
+        const output = await extractor(safeQuery, { pooling: 'mean', normalize: true, truncation: true, max_length: 512 });
         queryEmbedding = Array.from(output.data) as number[];
       } catch (e: any) {
         console.error("Local query embed error:", e);
