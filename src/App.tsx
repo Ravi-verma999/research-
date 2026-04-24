@@ -29,8 +29,11 @@ export default function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadNote, setUploadNote] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [inputUrl, setInputUrl] = useState('');
+  const [useLocalModel, setUseLocalModel] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Focus and scroll
@@ -52,19 +55,51 @@ export default function App() {
     }
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const handleUrlUpload = async () => {
+    if (!inputUrl.trim()) return;
+    setIsUploading(true);
+    setUploadNote(null);
+    try {
+      const res = await fetch('/api/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: inputUrl.trim(), useLocalModel })
+      });
+      const data = await res.json();
+      
+      if (!res.ok) throw new Error(data.error || 'Failed to fetch URL');
+      setUploadNote(data.note || 'Indexed successfully');
+      setInputUrl('');
+      fetchBooks();
+    } catch (err: any) {
+      alert("URL Fetch Failed: " + err.message);
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
-    if (file.type !== 'application/pdf') {
-      alert("Please upload standard PDF files.");
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+
+    // Filter PDFs and EPUBs if a folder was selected
+    const validFiles = files.filter(f => 
+      f.type === 'application/pdf' || 
+      f.name.toLowerCase().endsWith('.pdf') || 
+      f.name.toLowerCase().endsWith('.epub') || 
+      f.type === 'application/epub+zip'
+    );
+
+    if (validFiles.length === 0) {
+      alert("No valid PDF or EPUB files found.");
       return;
     }
 
     setIsUploading(true);
     setUploadNote(null);
     const formData = new FormData();
-    formData.append('book', file);
+    validFiles.forEach(file => formData.append('books', file));
+    formData.append('useLocalModel', String(useLocalModel));
 
     try {
       const res = await fetch('/api/upload-book', {
@@ -83,6 +118,7 @@ export default function App() {
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+      if (folderInputRef.current) folderInputRef.current.value = '';
     }
   };
 
@@ -109,7 +145,7 @@ export default function App() {
       const res = await fetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: userMsg.content })
+        body: JSON.stringify({ question: userMsg.content, useLocalModel })
       });
       const data = await res.json();
       
@@ -182,22 +218,71 @@ export default function App() {
           </div>
         </div>
 
-        <div className="p-4 border-t border-green-900/30">
+        <div className="p-4 border-t border-green-900/30 space-y-3">
+          <label className="flex items-center space-x-2 text-xs text-green-400 cursor-pointer mb-2 p-2 bg-black/30 border border-green-900/40 rounded">
+            <input 
+              type="checkbox" 
+              checked={useLocalModel} 
+              onChange={e => setUseLocalModel(e.target.checked)}
+              className="accent-green-500 w-3 h-3"
+            />
+            <span>Use Local AI Models (Offline Mode)</span>
+          </label>
+        
           <input 
             type="file" 
-            accept="application/pdf"
+            accept="application/pdf,.epub,application/epub+zip"
             className="hidden" 
             ref={fileInputRef}
             onChange={handleFileUpload}
+            multiple
           />
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-            className="w-full relative py-3 bg-green-500/10 hover:bg-green-500/20 border border-green-500/50 text-green-400 font-bold rounded-lg transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
-          >
-            {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-            <span>{isUploading ? 'INDEXING...' : 'UPLOAD KNOWLEDGE'}</span>
-          </button>
+          <input 
+            type="file" 
+            className="hidden" 
+            ref={folderInputRef}
+            onChange={handleFileUpload}
+            //@ts-ignore
+            webkitdirectory="true"
+            directory="true"
+            multiple
+          />
+          <div className="flex space-x-2 w-full">
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="flex-1 relative py-2 bg-green-500/10 hover:bg-green-500/20 border border-green-500/50 text-green-400 text-xs font-bold rounded-lg transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+            >
+              {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              <span>FILES</span>
+            </button>
+            <button 
+              onClick={() => folderInputRef.current?.click()}
+              disabled={isUploading}
+              className="flex-1 relative py-2 bg-green-500/10 hover:bg-green-500/20 border border-green-500/50 text-green-400 text-xs font-bold rounded-lg transition-all flex items-center justify-center space-x-2 disabled:opacity-50"
+            >
+              {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              <span>FOLDER</span>
+            </button>
+          </div>
+
+          <div className="flex space-x-2 w-full mt-2">
+            <input 
+              type="text" 
+              value={inputUrl}
+              onChange={e => setInputUrl(e.target.value)}
+              placeholder="Cloud link (Drive, PDF url)..."
+              className="flex-1 bg-black/50 border border-green-500/30 rounded p-2 text-xs text-green-400 focus:outline-none"
+              disabled={isUploading}
+            />
+            <button 
+              onClick={handleUrlUpload}
+              disabled={isUploading || !inputUrl.trim()}
+              className="px-3 py-2 bg-green-500/20 text-green-400 font-bold rounded-lg text-xs border border-green-500/50 disabled:opacity-50 flex items-center justify-center"
+            >
+              {isUploading ? <Loader2 className="w-3 h-3 animate-spin" /> : 'FETCH'}
+            </button>
+          </div>
           
           {uploadNote && (
             <div className="mt-3 flex items-start space-x-2 text-[10px] text-yellow-500/80 bg-yellow-500/10 p-2 rounded border border-yellow-500/20">
