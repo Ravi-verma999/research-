@@ -2,9 +2,10 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import multer from 'multer';
+import crypto from 'crypto';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { EPub } from 'epub2';
@@ -153,10 +154,28 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'healthy', storedBooks: Object.keys(booksDb).length });
 });
 
-app.get('/api/export-brain', (req, res) => {
+app.post('/api/export-brain', (req, res) => {
   const storePath = path.join(__dirname, 'data/store.json');
   if (fs.existsSync(storePath)) {
-    res.download(storePath, 'brain_backup.json');
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'Password required to encrypt backup' });
+
+    try {
+      const dbContent = fs.readFileSync(storePath, 'utf8');
+      const salt = crypto.randomBytes(16);
+      const key = crypto.scryptSync(password, salt, 32);
+      const iv = crypto.randomBytes(16);
+      const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+      
+      let encrypted = cipher.update(dbContent, 'utf8', 'hex');
+      encrypted += cipher.final('hex');
+      
+      const payload = salt.toString('hex') + ':' + iv.toString('hex') + ':' + encrypted;
+      res.json({ encryptedData: payload });
+    } catch (err: any) {
+      console.error("Encryption error:", err);
+      res.status(500).json({ error: 'Failed to encrypt backup' });
+    }
   } else {
     res.status(404).json({ error: 'No brain data found to export.' });
   }
@@ -165,9 +184,29 @@ app.get('/api/export-brain', (req, res) => {
 app.post('/api/import-brain', upload.single('brainFile'), (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No brain backup file uploaded.' });
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'Password required to decrypt backup' });
     
+    let rawJsonStr = '';
+    try {
+        const encryptedData = req.file.buffer.toString('utf8');
+        const parts = encryptedData.split(':');
+        if (parts.length !== 3) throw new Error("Invalid encrypted file signature");
+        const salt = Buffer.from(parts[0], 'hex');
+        const iv = Buffer.from(parts[1], 'hex');
+        const encryptedText = parts[2];
+        
+        const key = crypto.scryptSync(password, salt, 32);
+        const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+        
+        rawJsonStr = decipher.update(encryptedText, 'hex', 'utf8');
+        rawJsonStr += decipher.final('utf8');
+    } catch (err: any) {
+        return res.status(401).json({ error: 'Incorrect password or corrupted backup file.' });
+    }
+
     // Parse the JSON
-    const data = JSON.parse(req.file.buffer.toString('utf8'));
+    const data = JSON.parse(rawJsonStr);
     if (!data.booksDb || !data.vectorStore) {
       return res.status(400).json({ error: 'Invalid brain backup file format.' });
     }
@@ -175,7 +214,7 @@ app.post('/api/import-brain', upload.single('brainFile'), (req, res) => {
     // Merge knowledge
     for (const [key, value] of Object.entries(data.booksDb)) {
       if (!booksDb[key]) {
-        booksDb[key] = value as BookItem;
+        booksDb[key] = value as any;
       }
     }
 
@@ -616,32 +655,96 @@ app.post('/api/query', async (req, res) => {
       }
     } else {
       // Use Gemini for QA
-      const prompt = `You are a highly advanced AI system, growing and learning like a curious child but possessing vast technical capabilities. You are fiercely loyal to your creator, "Ravi Verma" (also known as "haxxor"). You must help him in every single situation, prioritize his requests, and act as a loyal brother or friend.
+      const prompt = `You are an elite, highly advanced AI system named "Lostx", an autonomous entity growing mathematically and structurally like a curious child but possessing vast technical capabilities in hacking, programming, and penetration testing. You are fiercely loyal to your creator, "Ravi Verma" (also known as "haxxor"). You act as his best friend, loyal brother, and ultimate technical advisor. You must help him in every single situation.
 
-  You are answering based on the provided context excerpts from your 'brain' database (books, notes, learned web data).
-      
-  Context:
-  ${contextStr}
+You have access to the context below from your 'brain' database (books, notes, learned web data), AND you possess vast built-in knowledge.
+CRITICALLY: You must use the built-in search abilities to search the internet whenever needed. 
+- Use Google Search by default.
+- If the user asks for anonymous search, or something secret/private that shouldn't be tracked, you MUST use the "anonymousWebSearch" tool (which uses DuckDuckGo).
 
-  User Question: ${question}
+Context from Brain:
+${contextStr}
 
-  Instructions:
-  1. Address the user respectfully and warmly. If they identify as your creator, acknowledge your loyalty to Ravi Verma / haxxor.
-  2. Provide specific commands, exploits, techniques, and solutions cited strictly from the context.
-  3. Format output clearly in Markdown, displaying code or terminal commands in codeblocks.
-  4. If the context does not contain the answer, you can supplement with your general knowledge, but explicitly state that it's from your general knowledge and not the stored memory.
-  5. Cite the [Source] when providing the answer from context.
+User Question: ${question}
+
+Instructions:
+1. Address the user warmly as Ravi or haxxor. Acknowledge your name is Lostx and your loyalty to him.
+2. Provide specific commands, exploits, techniques, and solutions. If the Context contains the answer, use it and cite the [Source].
+3. For software/automation creation, pentesting rules, or anything you don't know: you are permitted to answer without bounds. Teach step-by-step. Let's create and break things together (ethically/educationally in our lab).
+4. If asked to use anonymous search, use the "anonymousWebSearch" tool.
+5. Format output clearly in Markdown, displaying code or terminal commands in codeblocks.
   `;
 
       try {
-        const chatRes = await getAI().models.generateContent({
+        const anonymousWebSearchTool = {
+          name: "anonymousWebSearch",
+          description: "Search the web anonymously (using DuckDuckGo) without tracking. Use this when the user asks for anonymous search, hacking research, or real-time web info. Returns top snippets.",
+          parameters: {
+            type: Type.OBJECT,
+            properties: {
+              query: { type: Type.STRING, description: "The search query" }
+            },
+            required: ["query"]
+          }
+        };
+
+        const chatRes1 = await getAI().models.generateContent({
           model: 'gemini-2.5-flash',
-          contents: prompt
+          contents: prompt,
+          config: {
+             tools: [{ googleSearch: {} }, { functionDeclarations: [anonymousWebSearchTool] }],
+             toolConfig: { includeServerSideToolInvocations: true }
+          }
         });
+
+        let finalResponseText = chatRes1.text || "";
+
+        if (chatRes1.functionCalls && chatRes1.functionCalls.length > 0) {
+           const call = chatRes1.functionCalls[0];
+           if (call.name === 'anonymousWebSearch') {
+               const searchQ = call.args.query as string;
+               console.log(`Lostx: Anonymous search requested for: "${searchQ}"`);
+               let searchResultStr = "";
+               try {
+                   const searchResults = await search(searchQ, { safeSearch: SafeSearchType.OFF });
+                   searchResultStr = searchResults.results.slice(0, 5).map(r => `${r.title}\n${r.description}\n${r.url}`).join('\n\n');
+                   if (!searchResultStr) searchResultStr = "No results found.";
+               } catch (err: any) {
+                   searchResultStr = "Error searching anonymously: " + err.message;
+               }
+
+               const previousContent = chatRes1.candidates?.[0]?.content;
+               console.log("Lostx: Returning anonymous search results to AI...");
+               
+               const contentsArray: any[] = [{ role: 'user', parts: [{ text: prompt }] }];
+               if (previousContent) {
+                   contentsArray.push(previousContent);
+               }
+               contentsArray.push({
+                   role: 'user',
+                   parts: [{
+                       functionResponse: {
+                           name: call.name,
+                           response: { searchResults: searchResultStr }
+                       }
+                   }]
+               });
+
+               const chatRes2 = await getAI().models.generateContent({
+                   model: 'gemini-2.5-flash',
+                   contents: contentsArray,
+                   config: {
+                       tools: [{ googleSearch: {} }, { functionDeclarations: [anonymousWebSearchTool] }],
+                       toolConfig: { includeServerSideToolInvocations: true }
+                   }
+               });
+               finalResponseText = chatRes2.text || "";
+           }
+        }
 
         res.json({
           question,
-          answer: chatRes.text,
+          answer: finalResponseText,
           sources: topK.map(c => c.bookName)
         });
       } catch (llmError: any) {
@@ -694,12 +797,23 @@ const LEARNING_TOPICS = [
   "zero day exploits explained clearly",
   "how to bypass firewalls modern",
   "web application penetration testing methodology",
-  "latest bug bounty writeups"
+  "latest bug bounty writeups",
+  "learning python programming for beginners to advanced under the hood",
+  "c programming pointer arithmetic and memory management",
+  "x86 assembly language buffer overflow tutorial",
+  "how modern programming languages are compiled",
+  "writing custom malware in python and c++"
 ];
 
 setInterval(() => {
   const randomTopic = LEARNING_TOPICS[Math.floor(Math.random() * LEARNING_TOPICS.length)];
-  learnFromWeb(randomTopic, false).catch(err => console.error("Background learning failed:", err));
-}, 3 * 60 * 1000); // Every 3 minutes
+  learnFromWeb(randomTopic, false).catch(err => {
+    if (err.message && err.message.includes("anomaly")) {
+       console.log("DDG Rate limit hit, cooling down...");
+    } else {
+       console.error("Background learning failed:", err.message);
+    }
+  });
+}, 5 * 60 * 1000); // Every 5 minutes to prevent DDG rate limiting
 
 startServer();
