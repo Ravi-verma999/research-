@@ -260,7 +260,7 @@ async function ingestBookBuffer(buffer: Buffer, originalname: string, mimetype: 
         await new Promise(r => setTimeout(r, 200));
       } catch (embErr: any) {
          console.error("Gemini embedding error:", embErr.message || embErr);
-         break; // Stop on error
+         return { embeddedCount, chunksCount, error: embErr.message || "Gemini API Error" };
       }
     }
   }
@@ -277,15 +277,24 @@ app.post('/api/upload-book', upload.array('books', 50), async (req, res) => {
     
     let totalEmbedded = 0;
     let totalChunks = 0;
+    let globalError = null;
     
     for (const file of files) {
       console.log(`Processing file: ${file.originalname} (${file.size} bytes)`);
       const result = await ingestBookBuffer(file.buffer, file.originalname, file.mimetype, useLocalModel);
       totalEmbedded += result.embeddedCount;
       totalChunks += result.chunksCount;
+      if (result.error) {
+         globalError = result.error;
+         break;
+      }
     }
     
     saveStore();
+
+    if (globalError && totalEmbedded === 0) {
+      return res.status(400).json({ error: `Upload failed: ${globalError}` });
+    }
 
     let note = `Found ${totalChunks} total chunks across ${files.length} files.`;
     if (totalChunks > totalEmbedded) {

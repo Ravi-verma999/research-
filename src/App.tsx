@@ -30,7 +30,7 @@ export default function App() {
   const [uploadNote, setUploadNote] = useState<string | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [inputUrl, setInputUrl] = useState('');
-  const [useLocalModel, setUseLocalModel] = useState(false);
+  const [useLocalModel, setUseLocalModel] = useState(true);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
